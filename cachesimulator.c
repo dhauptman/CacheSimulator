@@ -12,8 +12,11 @@
 #define CacheSizeExp 15
 #define CacheSize (1 << CacheSizeExp)
 
-//Address Size
-#define AddressSizeExp 32
+//Address Size in bits
+#define AddressSizeBits 32
+
+//Address Size in bytes
+#define AddressSizeByte (AddressSizeBits >> 3)
 
 //Cache Size
 #define CacheAssociativityExp 3
@@ -30,7 +33,7 @@
 #define LineSizeMask (LineSize - 1)
 
 //Tag Size
-#define TagExp (AddressSizeExp - (BlockSizeExp + LineSizeExp))
+#define TagExp (AddressSizeBits - (BlockSizeExp + LineSizeExp))
 #define TagSize (1 << TagExp)
 #define TagSizeMask (TagSize - 1)
 
@@ -48,9 +51,11 @@ BlockStruct cache[LineSize][CacheAssociativity] = {};
 
 void PrintParameters() {
   // Print cache parameters
+  printf("===============Cache Parameters===============\n");
   printf("Cache Size Exp: %d\n", CacheSizeExp);
   printf("Cache Size: %d\n", CacheSize);
-  printf("Address Size Exp: %d\n", AddressSizeExp);
+  printf("Address Size Bits: %d\n", AddressSizeBits);
+  printf("Address Size Bytes: %d\n", AddressSizeByte);
   printf("Block Size Exp: %d\n", BlockSizeExp);
   printf("Block Size: %d\n", BlockSize);
   printf("Block Size Mask: %d\n", BlockSizeMask);
@@ -60,18 +65,25 @@ void PrintParameters() {
   printf("Tag Exp: %d\n", TagExp);
   printf("Tag Size: %d\n", TagSize);
   printf("Tag Size Mask: %d\n", TagSizeMask);
+  printf("==============================================\n\n");
 }
 
 void replacement(uint32_t address) {
   int BlockColumn = 0;
+  uint32_t Line = (address >> BlockSizeExp) & LineSizeMask;
+  uint32_t Tag = ((address >> (BlockSizeExp + LineSizeExp)) & TagSizeMask);
+  
   for(;BlockColumn < CacheAssociativity; ++BlockColumn) {
     //If its not valid
-    if(!cache[(address >> BlockSizeExp) & LineSizeMask][BlockColumn].valid) {
+    if(!cache[Line][BlockColumn].valid) {
       //Set the tag to the address
-
-      cache[(address >> BlockSizeExp) & LineSizeMask][BlockColumn].tag = (address >> (BlockSizeExp + LineSizeExp)) & TagSizeMask;
+      cache[Line][BlockColumn].tag = Tag;
       //Set it to valid
-      cache[(address >> BlockSizeExp) & LineSizeMask][BlockColumn].valid = true;
+      cache[Line][BlockColumn].valid = true;
+    }
+    else {
+      //Set the block to invalid
+      cache[Line][BlockColumn].valid = false;
     }
   }
 }
@@ -84,7 +96,7 @@ void ReadFromTraceFile() {
   }
   uint32_t address;
   //Read in each address from the file 32-bits each
-  while (fread(&address, (AddressSizeExp >> 3), 1, inFile) != 0) {
+  while (fread(&address, AddressSizeByte, 1, inFile) != 0) {
     uint32_t Line = (address >> BlockSizeExp) & LineSizeMask;
     uint32_t Tag = ((address >> (BlockSizeExp + LineSizeExp)) & TagSizeMask);
     //Used for associativity
@@ -102,11 +114,6 @@ void ReadFromTraceFile() {
         //break out of for loop
         break;
       }
-      else {
-        //Set the block to invalid
-        cache[Line][BlockColumn].valid = false;
-
-      }
       //printf("%d\n", TagSizeMask);
 
     }
@@ -120,8 +127,12 @@ void ReadFromTraceFile() {
     }
 
   }
+
+  printf("\n===============Cache Results===============\n");
   printf("Cache hit: %d\n", cacheHit);
   printf("Cache miss: %d\n", cacheMiss);
+  printf("Cache hit ratio: %.02f%%\n", (float)(100.0 * cacheHit/(cacheMiss + cacheHit)));
+  printf("===========================================\n\n");
 }
 
 
