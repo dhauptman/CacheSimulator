@@ -19,7 +19,7 @@
 #define AddressSizeByte (AddressSizeBits >> 3)
 
 //Cache Size
-#define CacheAssociativityExp 3
+#define CacheAssociativityExp 0
 #define CacheAssociativity (1 << CacheAssociativityExp)
 
 //Block Size
@@ -72,7 +72,7 @@ void replacement(uint32_t address) {
   int BlockColumn = 0;
   uint32_t Line = (address >> BlockSizeExp) & LineSizeMask;
   uint32_t Tag = ((address >> (BlockSizeExp + LineSizeExp)) & TagSizeMask);
-  
+
   for(;BlockColumn < CacheAssociativity; ++BlockColumn) {
     //If its not valid
     if(!cache[Line][BlockColumn].valid) {
@@ -90,7 +90,7 @@ void replacement(uint32_t address) {
 //Don't ask what is going on in here
 void ReadFromTraceFile() {
   //Open the file
-  inFile = fopen("AddressTrace_LastIndex.bin", "r");
+  //inFile = fopen("AddressTrace_LastIndex.bin", "r");
   if (inFile != NULL) {
     printf("Read file correctly\n");
   }
@@ -137,9 +137,16 @@ void ReadFromTraceFile() {
 
 
 
-void main(void) {
-  //Print what the compiler stuff
-  PrintParameters();
-  //Read in the trace file
-  ReadFromTraceFile();
+void main(int argc, char *argv[]) {
+  if(argc != 2){
+    printf("Error: No filename entered\n");
+  }
+  else{
+    inFile = fopen(argv[1], "r");
+    //Print what the compiler stuff
+    PrintParameters();
+    //Read in the trace file
+    ReadFromTraceFile();
+    fclose(inFile);
+  }
 }
