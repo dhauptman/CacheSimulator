@@ -1,3 +1,15 @@
+//*****************************************************************************
+//
+//	Program:		cachesimulator.c
+//	Author:			Dustin Hauptman <dhauptman@ku.edu>
+//              Lucas Suchy <l330s939@ku.edu>
+//	Date:			2017-04-13
+//	Description:	A L1 cache read simulator
+//
+//  Note: The initial #define's in the code were provided by Gary Minden.
+//
+//*****************************************************************************
+
 #include <stdio.h>
 #include <time.h>
 #include <string.h>
@@ -8,39 +20,60 @@
 #include <stdint.h>
 #include <stdarg.h>
 
-//Size of the cache
+//
+// Size of the cache
+//
 #define CacheSizeExp 15
 #define CacheSize (1 << CacheSizeExp)
 
-//Address Size in bits
+//
+// Address Size in bits
+//
 #define AddressSizeBits 32
 
-//Address Size in bytes
+//
+// Address Size in bytes
+//
 #define AddressSizeByte (AddressSizeBits >> 3)
 
-//Cache Size
-#define CacheAssociativityExp 0
+//
+// Cache Size
+//
+#define CacheAssociativityExp 2
 #define CacheAssociativity (1 << CacheAssociativityExp)
 
-//Block Size
+//
+// Block Size
+//
 #define BlockSizeExp 6
 #define BlockSize (1 << BlockSizeExp)
 #define BlockSizeMask (BlockSize - 1)
 
-//Line Size
+//
+// Line Size
+//
 #define LineSizeExp (CacheSizeExp - (CacheAssociativityExp + BlockSizeExp))
 #define LineSize (1 << LineSizeExp)
 #define LineSizeMask (LineSize - 1)
 
-//Tag Size
+//
+// Tag Size
+//
 #define TagExp (AddressSizeBits - (BlockSizeExp + LineSizeExp))
 #define TagSize (1 << TagExp)
 #define TagSizeMask (TagSize - 1)
 
+//
+// Trace file
+//
 FILE* inFile;
 
+//
+// Structure representing the block in the cache
+//
 typedef struct BlockStruct {
   bool valid;
+  bool full;
   uint32_t tag;
 } BlockStruct;
 
@@ -49,8 +82,10 @@ int cacheMiss = 0;
 
 BlockStruct cache[LineSize][CacheAssociativity] = {};
 
+//
+// Function to print cache parameters
+//
 void PrintParameters() {
-  // Print cache parameters
   printf("===============Cache Parameters===============\n");
   printf("Cache Size Exp: %d\n", CacheSizeExp);
   printf("Cache Size: %d\n", CacheSize);
@@ -68,66 +103,200 @@ void PrintParameters() {
   printf("==============================================\n\n");
 }
 
+//
+// Function used to replace a block in the specified line of the
+// cache if there was no hit. The replacement algorithm used is FIFO.
+//
 void replacement(uint32_t address) {
   int BlockColumn = 0;
+  bool replaced = false;
+  bool hasEmpty = false;
   uint32_t Line = (address >> BlockSizeExp) & LineSizeMask;
   uint32_t Tag = ((address >> (BlockSizeExp + LineSizeExp)) & TagSizeMask);
 
-  for(;BlockColumn < CacheAssociativity; ++BlockColumn) {
-    //If its not valid
-    if(!cache[Line][BlockColumn].valid) {
-      //Set the tag to the address
-      cache[Line][BlockColumn].tag = Tag;
-      //Set it to valid
-      cache[Line][BlockColumn].valid = true;
+  //
+  // Check to see if there are any empty blocks in the line
+  //
+  while(BlockColumn < CacheAssociativity) {
+
+    //
+    // If an empty block is found set flag to indicate this
+    //
+    if(!cache[Line][BlockColumn].full){
+      hasEmpty = true;
     }
-    else {
-      //Set the block to invalid
+    ++BlockColumn;
+  }
+
+  BlockColumn = 0;
+
+  //
+  //Loop to find which block needs to replace
+  //
+  for(;BlockColumn < CacheAssociativity; ++BlockColumn) {
+
+    //
+    //If the line has an empty block replace the first empty block
+    //
+    if(hasEmpty){
+
+      //
+      //Found the empty block
+      //
+      if(!cache[Line][BlockColumn].full){
+
+        //
+        //Fill the empty block with the tag
+        //
+        cache[Line][BlockColumn].tag = Tag;
+
+        //
+        //Set it to valid and full
+        //
+        cache[Line][BlockColumn].valid = true;
+        cache[Line][BlockColumn].full = true;
+        replaced = true;
+        break;
+      }
+      else {
+
+        //
+        //Set the block to invalid
+        //
+        cache[Line][BlockColumn].valid = false;
+      }
+    }
+
+    //
+    //If all blocks in the line are full
+    //
+    else{
+
+      //
+      //If the block is valid
+      //
+      if(cache[Line][BlockColumn].valid) {
+        if(BlockColumn == (CacheAssociativity-1)){
+
+          //
+          //Set the tag to the address
+          //
+          cache[Line][0].tag = Tag;
+
+          //
+          //Set it to valid
+          //
+          cache[Line][0].valid = true;
+          cache[Line][BlockColumn].valid = false;
+          replaced = true;
+          break;
+        }
+        else{
+
+          //
+          //Set the tag to the address
+          //
+
+          cache[Line][BlockColumn+1].tag = Tag;
+          //
+          //Set it to valid
+          //
+          cache[Line][BlockColumn+1].valid = true;
+          cache[Line][BlockColumn].valid = false;
+          replaced = true;
+          break;
+        }
+      }
+      else {
+
+        //
+        //Set the block to invalid
+        //
+        cache[Line][BlockColumn].valid = false;
+      }
+    }
+  }
+
+  //
+  //If we never replaced (i.e. a line full of valids) replace the first one
+  //
+  if(!replaced) {
+    cache[Line][0].tag = Tag;
+    cache[Line][0].valid = true;
+  }
+
+  //
+  //If we did replace, make sure to invalidate all other blocks
+  //
+  else if(replaced) {
+
+    //
+    //Don't invalidate the one we just replaced
+    //
+    ++BlockColumn;
+    while(BlockColumn < CacheAssociativity) {
       cache[Line][BlockColumn].valid = false;
+      ++BlockColumn;
     }
   }
 }
-//Don't ask what is going on in here
+
+//
+// Function for reading an address from the given trace file and
+// check if the cache returns a hit or miss for the address
+//
 void ReadFromTraceFile() {
-  //Open the file
-  //inFile = fopen("AddressTrace_LastIndex.bin", "r");
-  if (inFile != NULL) {
-    printf("Read file correctly\n");
-  }
+
   uint32_t address;
+
+  //
   //Read in each address from the file 32-bits each
+  //
   while (fread(&address, AddressSizeByte, 1, inFile) != 0) {
+
     uint32_t Line = (address >> BlockSizeExp) & LineSizeMask;
     uint32_t Tag = ((address >> (BlockSizeExp + LineSizeExp)) & TagSizeMask);
+
+    //
     //Used for associativity
+    //
     int BlockColumn = 0;
     bool Hit = false;
+
+    //
     //Loop over the columns
+    //
     for(;BlockColumn < CacheAssociativity; ++BlockColumn) {
-      //if the cache[Line][Column]'s tag is equal to read in tag
+      //
+      //If the cache[Line][Column]'s tag is equal to read in tag
+      //
       if(cache[Line][BlockColumn].tag == Tag) {
-        //We get a hit and move on
+
+        //
+        //We get a hit so increment the hit value and move on
+        //
         ++cacheHit;
-        //Set block as valid
-        cache[Line][BlockColumn].valid = true;
         Hit = true;
-        //break out of for loop
         break;
       }
-      //printf("%d\n", TagSizeMask);
-
     }
     if(Hit == false) {
-      //printf("Line: %d\n", Line);
-      //printf("Tag: %d\n", Tag);
-      //Otherwise we got a miss
+      //
+      // Otherwise we got a miss
+      //
       ++cacheMiss;
-      //Call Replacement method
+
+      //
+      // Call Replacement method
+      //
       replacement(address);
     }
 
   }
 
+  //
+  // Print out the results
+  //
   printf("\n===============Cache Results===============\n");
   printf("Cache hit: %d\n", cacheHit);
   printf("Cache miss: %d\n", cacheMiss);
@@ -143,9 +312,15 @@ void main(int argc, char *argv[]) {
   }
   else{
     inFile = fopen(argv[1], "r");
-    //Print what the compiler stuff
+
+    //
+    // Print cache parameters
+    //
     PrintParameters();
-    //Read in the trace file
+
+    //
+    // Read in the trace file
+    //
     ReadFromTraceFile();
     fclose(inFile);
   }
